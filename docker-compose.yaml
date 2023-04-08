@@ -1,0 +1,16 @@
+version: '3.7'
+services:
+  db:
+    image: "healthsamurai/aidboxdb:14.5-similarity"
+    container_name: "db"
+    env_file:
+      - .env
+    ports:
+      - "5436:5432"
+    volumes:
+      - "./pgdata:/data:delegated"
+    environment:
+      PGPORT:            5432
+      POSTGRES_USER:     "${PGUSER}"
+      POSTGRES_PASSWORD: "${PGPASSWORD}"
+      POSTGRES_DB:       "${PGDATABASE}"

@@ -1,7 +1,9 @@
 .idea
 vendor/
 .DS_Store
-/main
 *.tgz
 *.iml
 Chart.lock
+pgdata
+target
+.env
