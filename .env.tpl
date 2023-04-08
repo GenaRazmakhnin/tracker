@@ -1,0 +1,5 @@
+PGUSER=postgres
+PGPASSWORD=postgres
+PGDATABASE=tracker
+PGPORT=5436
+PGHOST=localhost

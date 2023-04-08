@@ -1,12 +1,11 @@
 version: '3.7'
 services:
   db:
-    image: "healthsamurai/aidboxdb:14.5-similarity"
-    container_name: "db"
+    image: postgres:15
     env_file:
       - .env
     ports:
-      - "5436:5432"
+      - "${PGPORT}:5432"
     volumes:
       - "./pgdata:/data:delegated"
     environment:
