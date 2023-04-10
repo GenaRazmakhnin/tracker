@@ -14,9 +14,6 @@ use tower_http::{classify::ServerErrorsFailureClass, trace::TraceLayer};
 use crate::metrics::start_metrics_server;
 
 
-
-
-
 fn main_app() -> Router{
    Router::new().route("/", get(handler)).layer(
         TraceLayer::new_for_http()
