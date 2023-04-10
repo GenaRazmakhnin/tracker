@@ -1,65 +1,42 @@
 mod metrics;
+mod db;
+mod models;
+mod schema;
+mod posts;
 
-use axum::{response::Html, routing::get, Router, middleware};
+use axum::{response::Html, routing::get, Router, middleware, Json};
 use std::net::SocketAddr;
 use std::time::Duration;
 use axum::body::Bytes;
-use axum::extract::MatchedPath;
+use axum::extract::{MatchedPath, State};
 use axum::http::{HeaderMap, Request, StatusCode};
 use axum::response::{IntoResponse, Response};
+use diesel_async::AsyncPgConnection;
+use diesel_async::pooled_connection::AsyncDieselConnectionManager;
 use tokio::signal;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 use tracing::{info_span, Span};
 use tower_http::{classify::ServerErrorsFailureClass, trace::TraceLayer};
 use crate::metrics::start_metrics_server;
+use crate::models::Post;
+use crate::posts::show_posts;
 
 
-fn main_app() -> Router{
-   Router::new().route("/", get(handler)).layer(
-        TraceLayer::new_for_http()
-            .make_span_with(|request: &Request<_>| {
-                // Log the matched route's path (with placeholders not filled in).
-                // Use request.uri() or OriginalUri if you want the real path.
-                let matched_path = request
-                    .extensions()
-                    .get::<MatchedPath>()
-                    .map(MatchedPath::as_str);
+type Pool = bb8::Pool<AsyncDieselConnectionManager<AsyncPgConnection>>;
 
-                info_span!(
-                        "http_request",
-                        method = ?request.method(),
-                        matched_path,
-                        some_other_field = tracing::field::Empty,
-                    )
-            })
-            .on_request(|_request: &Request<_>, _span: &Span| {
-                // You can use `_span.record("some_other_field", value)` in one of these
-                // closures to attach a value to the initially empty field in the info_span
-                // created above.
-            })
-            .on_response(|_response: &Response, _latency: Duration, _span: &Span| {
-                // ...
-            })
-            .on_body_chunk(|_chunk: &Bytes, _latency: Duration, _span: &Span| {
-                // ...
-            })
-            .on_eos(
-                |_trailers: Option<&HeaderMap>, _stream_duration: Duration, _span: &Span| {
-                    // ...
-                },
-            )
-            .on_failure(
-                |_error: ServerErrorsFailureClass, _latency: Duration, _span: &Span| {
-                    // ...
-                },
-            ),
-    ).fallback(handler_404).route_layer(middleware::from_fn(metrics::track_metrics))
-
-}
 
 async fn start_main_server() {
-    let app = main_app();
-    let port=  std::env::var("PORT").unwrap_or("8080".to_string()).parse::<u16>().unwrap();
+    let port = std::env::var("PORT").unwrap_or("8080".to_string()).parse::<u16>().unwrap();
+    let db_url = std::env::var("DATABASE_URL").unwrap();
+
+    let config = AsyncDieselConnectionManager::<diesel_async::AsyncPgConnection>::new(db_url);
+    let pool = bb8::Pool::builder().build(config).await.unwrap();
+
+
+    let app = Router::new()
+        .route("/", get(handler))
+        .fallback(handler_404)
+        .route_layer(middleware::from_fn(metrics::track_metrics)).with_state(pool);
 
 
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
@@ -83,9 +60,13 @@ async fn main() {
         .init();
 
 
-
-
     let (_main_server, _metrics_server) = tokio::join!(start_main_server(), start_metrics_server());
+}
+
+
+async fn get_posts(State(pool): State<Pool>) -> Result<Json<Vec<Post>>, (StatusCode, String)> {
+    let posts = show_posts(poll).await;
+    Ok(Json(posts))
 }
 
 
