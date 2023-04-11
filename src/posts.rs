@@ -1,23 +1,29 @@
-use std::error::Error;
-use axum::extract::State;
-use axum::http::StatusCode;
-use self::models::*;
 use diesel::prelude::*;
-use diesel_async::AsyncPgConnection;
+use axum::http::StatusCode;
+use diesel_async::{AsyncPgConnection, RunQueryDsl};
 use diesel_async::pooled_connection::AsyncDieselConnectionManager;
-use super::db::establish_connection;
-use super::models;
+
+
+#[derive(serde::Serialize, Queryable)]
+pub struct Post {
+    pub id: i32,
+    pub title: String,
+    pub body: String,
+    pub published: bool,
+}
+
 
 type Pool = bb8::Pool<AsyncDieselConnectionManager<AsyncPgConnection>>;
 
-pub async fn show_posts(State(pool): State<Pool>) -> Result<Vec<Post>, dyn Error> {
-    use self::super::schema::posts::dsl::*;
+pub async fn show_posts(pool: Pool) -> Result<Vec<Post>, (StatusCode, String)> {
+    use crate::schema::posts::dsl::*;
     let mut conn = pool.get().await.map_err(internal_error)?;
     posts
         .filter(published.eq(true))
         .limit(5)
         .load::<Post>(&mut conn)
-        .expect("Error loading posts")
+        .await
+        .map_err(internal_error)
 }
 
 

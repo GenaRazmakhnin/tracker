@@ -7,4 +7,4 @@ dev: db
 
 .PHONY: diesel-cli
 diesel-cli:
-	cargo install diesel_cli --no-default-features --features postgres
+	brew install diesel

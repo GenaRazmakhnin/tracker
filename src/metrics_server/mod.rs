@@ -9,6 +9,7 @@ use axum::Router;
 use axum::routing::get;
 use metrics_exporter_prometheus::{Matcher, PrometheusBuilder, PrometheusHandle};
 use metrics::{increment_counter, histogram};
+use crate::shutdown::shutdown_signal;
 
 fn metrics_app() -> Router {
     let recorder_handle = setup_metrics_recorder();
@@ -24,6 +25,7 @@ pub async fn start_metrics_server() {
     tracing::debug!("listening on {}", addr);
     axum::Server::bind(&addr)
         .serve(app.into_make_service())
+        .with_graceful_shutdown(shutdown_signal())
         .await
         .unwrap()
 }

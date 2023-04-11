@@ -1,42 +1,77 @@
-mod metrics;
-mod db;
-mod models;
-mod schema;
+mod metrics_server;
 mod posts;
+mod schema;
+mod shutdown;
 
 use axum::{response::Html, routing::get, Router, middleware, Json};
 use std::net::SocketAddr;
-use std::time::Duration;
-use axum::body::Bytes;
-use axum::extract::{MatchedPath, State};
-use axum::http::{HeaderMap, Request, StatusCode};
-use axum::response::{IntoResponse, Response};
+use axum::extract::{State};
+use axum::http::{StatusCode};
+use axum::response::{IntoResponse};
 use diesel_async::AsyncPgConnection;
-use diesel_async::pooled_connection::AsyncDieselConnectionManager;
-use tokio::signal;
+use diesel_async::pooled_connection::{AsyncDieselConnectionManager};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
-use tracing::{info_span, Span};
-use tower_http::{classify::ServerErrorsFailureClass, trace::TraceLayer};
-use crate::metrics::start_metrics_server;
-use crate::models::Post;
-use crate::posts::show_posts;
+use self::metrics_server::start_metrics_server;
+use self::posts::Post;
+use self::posts::show_posts;
+use std::{
+    env,
+    fmt::{self},
+};
+use std::time::Duration;
+use crate::shutdown::shutdown_signal;
+
+#[derive(PartialEq, Debug)]
+enum AppEnv {
+    Dev,
+    Prod,
+}
+
+
+impl fmt::Display for AppEnv {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let printable = match *self {
+            AppEnv::Dev => "dev",
+            AppEnv::Prod => "prod",
+        };
+        write!(f, "{printable}")
+    }
+}
 
 
 type Pool = bb8::Pool<AsyncDieselConnectionManager<AsyncPgConnection>>;
 
 
 async fn start_main_server() {
-    let port = std::env::var("PORT").unwrap_or("8080".to_string()).parse::<u16>().unwrap();
-    let db_url = std::env::var("DATABASE_URL").unwrap();
+    let app_env = match env::var("APP_ENV") {
+        Ok(v) if v == "prod" => AppEnv::Prod,
+        _ => AppEnv::Dev,
+    };
+    tracing::info!("Running in {app_env} mode");
 
-    let config = AsyncDieselConnectionManager::<diesel_async::AsyncPgConnection>::new(db_url);
-    let pool = bb8::Pool::builder().build(config).await.unwrap();
+    if app_env == AppEnv::Dev {
+        match dotenvy::dotenv() {
+            Ok(path) => tracing::debug!(".env read successfully from {}", path.display()),
+            Err(e) => tracing::debug!("Could not load .env file: {e}"),
+        };
+    }
 
+    let port = env::var("PORT").unwrap_or("8080".to_string()).parse::<u16>().unwrap();
+
+    let db_url = env::var("DATABASE_URL").unwrap();
+    let config = AsyncDieselConnectionManager::<AsyncPgConnection>::new(db_url.clone());
+    let pool = Pool::builder()
+        .connection_timeout(Duration::from_secs(10))
+        .build(config).await.unwrap();
+
+    if let Err(err) = pool.get().await { panic!("Cannot connect to database - {err}") }
 
     let app = Router::new()
         .route("/", get(handler))
+        .route("/posts", get(get_posts))
         .fallback(handler_404)
-        .route_layer(middleware::from_fn(metrics::track_metrics)).with_state(pool);
+        .route_layer(middleware::from_fn(metrics_server::track_metrics))
+        .with_state(pool);
 
 
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
@@ -65,7 +100,7 @@ async fn main() {
 
 
 async fn get_posts(State(pool): State<Pool>) -> Result<Json<Vec<Post>>, (StatusCode, String)> {
-    let posts = show_posts(poll).await;
+    let posts = show_posts(pool).await?;
     Ok(Json(posts))
 }
 
@@ -76,38 +111,4 @@ async fn handler_404() -> impl IntoResponse {
 
 async fn handler() -> Html<&'static str> {
     Html("<h1>Hello, World!</h1>")
-}
-
-async fn shutdown_signal() {
-    let ctrl_c = async {
-        signal::ctrl_c()
-            .await
-            .expect("failed to install Ctrl+C handler");
-    };
-
-    #[cfg(unix)]
-        let terminate = async {
-        signal::unix::signal(signal::unix::SignalKind::terminate())
-            .expect("failed to install signal handler")
-            .recv()
-            .await;
-    };
-
-    #[cfg(not(unix))]
-        let terminate = std::future::pending::<()>();
-
-    tokio::select! {
-        _ = ctrl_c => {},
-        _ = terminate => {},
-    }
-
-    tracing::info!("signal received, starting graceful shutdown");
-}
-
-
-fn internal_error<E>(err: E) -> (StatusCode, String)
-    where
-        E: std::error::Error,
-{
-    (StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
 }
