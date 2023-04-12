@@ -2,6 +2,7 @@ mod metrics_server;
 mod posts;
 mod schema;
 mod shutdown;
+mod auth;
 
 use axum::{response::Html, routing::get, Router, middleware, Json};
 use std::net::SocketAddr;
@@ -20,6 +21,12 @@ use std::{
 };
 use std::time::Duration;
 use crate::shutdown::shutdown_signal;
+use oauth2::{
+    basic::BasicClient, reqwest::async_http_client, AuthUrl, AuthorizationCode, ClientId,
+    ClientSecret, CsrfToken, RedirectUrl, Scope, TokenResponse, TokenUrl,
+};
+use http::{header, request::Parts};
+
 
 #[derive(PartialEq, Debug)]
 enum AppEnv {
@@ -63,6 +70,7 @@ async fn start_main_server() {
     let pool = Pool::builder()
         .connection_timeout(Duration::from_secs(10))
         .build(config).await.unwrap();
+
 
     if let Err(err) = pool.get().await { panic!("Cannot connect to database - {err}") }
 
