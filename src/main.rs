@@ -30,6 +30,7 @@ use oauth2::{
 };
 use http::{header, request::Parts};
 use tower_cookies::CookieManagerLayer;
+use crate::model::ModelController;
 
 
 #[derive(PartialEq, Debug)]
@@ -61,7 +62,7 @@ async fn main_response_mapper(res: Response) -> Response{
 }
 
 
-async fn start_main_server() {
+async fn start_main_server() -> Result<()>{
     let app_env = match env::var("APP_ENV") {
         Ok(v) if v == "prod" => AppEnv::Prod,
         _ => AppEnv::Dev,
@@ -84,11 +85,16 @@ async fn start_main_server() {
         .build(config).await.unwrap();
 
 
-    if let Err(err) = pool.get().await { panic!("Cannot connect to database - {err}") }
+    if let Err(_err) = pool.get().await { panic!("Cannot connect to database - {err}") }
+
+
+    let mc = ModelController::new().await?;
+
 
     let app = Router::new()
         .route("/", get(handler))
         .merge(web::auth::routes())
+        .nest("/api", web::routes_tickets::routes(mc.clone()))
         .layer(middleware::map_response(main_response_mapper))
         .layer(CookieManagerLayer::new())
         .fallback(handler_404)
@@ -103,7 +109,9 @@ async fn start_main_server() {
         .serve(app.into_make_service())
         .with_graceful_shutdown(shutdown_signal())
         .await
-        .unwrap()
+        .unwrap();
+
+    Ok(())
 }
 
 
