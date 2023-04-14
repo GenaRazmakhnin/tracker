@@ -3,18 +3,21 @@ mod posts;
 mod schema;
 mod shutdown;
 mod auth;
+mod error;
+mod web;
+mod model;
 
+
+pub use self::error::{Error,Result};
 use axum::{response::Html, routing::get, Router, middleware, Json};
 use std::net::SocketAddr;
 use axum::extract::{State};
 use axum::http::{StatusCode};
-use axum::response::{IntoResponse};
+use axum::response::{IntoResponse, Response};
 use diesel_async::AsyncPgConnection;
 use diesel_async::pooled_connection::{AsyncDieselConnectionManager};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 use self::metrics_server::start_metrics_server;
-use self::posts::Post;
-use self::posts::show_posts;
 use std::{
     env,
     fmt::{self},
@@ -26,6 +29,7 @@ use oauth2::{
     ClientSecret, CsrfToken, RedirectUrl, Scope, TokenResponse, TokenUrl,
 };
 use http::{header, request::Parts};
+use tower_cookies::CookieManagerLayer;
 
 
 #[derive(PartialEq, Debug)]
@@ -47,6 +51,14 @@ impl fmt::Display for AppEnv {
 
 
 type Pool = bb8::Pool<AsyncDieselConnectionManager<AsyncPgConnection>>;
+
+
+
+async fn main_response_mapper(res: Response) -> Response{
+    println!("->> {:<12} - main_response_mapper", "HANDLER");
+    println!();
+    res
+}
 
 
 async fn start_main_server() {
@@ -76,10 +88,13 @@ async fn start_main_server() {
 
     let app = Router::new()
         .route("/", get(handler))
-        .route("/posts", get(get_posts))
+        .merge(web::auth::routes())
+        .layer(middleware::map_response(main_response_mapper))
+        .layer(CookieManagerLayer::new())
         .fallback(handler_404)
-        .route_layer(middleware::from_fn(metrics_server::track_metrics))
-        .with_state(pool);
+        .route_layer(middleware::from_fn(metrics_server::track_metrics));
+        // .with_state(pool);
+
 
 
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
@@ -107,16 +122,11 @@ async fn main() {
 }
 
 
-async fn get_posts(State(pool): State<Pool>) -> Result<Json<Vec<Post>>, (StatusCode, String)> {
-    let posts = show_posts(pool).await?;
-    Ok(Json(posts))
-}
-
-
 async fn handler_404() -> impl IntoResponse {
     (StatusCode::NOT_FOUND, "nothing to see here")
 }
 
 async fn handler() -> Html<&'static str> {
+    println!("->> {:<12} - root handler", "HANDLER");
     Html("<h1>Hello, World!</h1>")
 }
