@@ -2,6 +2,7 @@ use diesel::prelude::*;
 use axum::http::StatusCode;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
 use diesel_async::pooled_connection::AsyncDieselConnectionManager;
+use crate::Pool;
 
 
 #[derive(serde::Serialize, Queryable)]
@@ -13,7 +14,6 @@ pub struct Post {
 }
 
 
-type Pool = bb8::Pool<AsyncDieselConnectionManager<AsyncPgConnection>>;
 
 pub async fn show_posts(pool: Pool) -> Result<Vec<Post>, (StatusCode, String)> {
     use crate::schema::posts::dsl::*;

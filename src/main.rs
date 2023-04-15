@@ -6,16 +6,21 @@ mod auth;
 mod error;
 mod web;
 mod model;
+mod state;
 
 
+pub use self::state::{AppState, Pool};
 pub use self::error::{Error,Result};
-use axum::{response::Html, routing::get, Router, middleware, Json};
+use crate::shutdown::shutdown_signal;
+use crate::model::ModelController;
+
+
+use axum::{response::Html, routing::get, Router, middleware};
 use std::net::SocketAddr;
-use axum::extract::{State};
 use axum::http::{StatusCode};
 use axum::response::{IntoResponse, Response};
 use diesel_async::AsyncPgConnection;
-use diesel_async::pooled_connection::{AsyncDieselConnectionManager};
+use diesel_async::pooled_connection::{AsyncDieselConnectionManager, PoolableConnection};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 use self::metrics_server::start_metrics_server;
 use std::{
@@ -23,14 +28,13 @@ use std::{
     fmt::{self},
 };
 use std::time::Duration;
-use crate::shutdown::shutdown_signal;
-use oauth2::{
-    basic::BasicClient, reqwest::async_http_client, AuthUrl, AuthorizationCode, ClientId,
-    ClientSecret, CsrfToken, RedirectUrl, Scope, TokenResponse, TokenUrl,
-};
-use http::{header, request::Parts};
 use tower_cookies::CookieManagerLayer;
-use crate::model::ModelController;
+use crate::web::auth::mw_require_auth;
+use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
+use once_cell::sync::Lazy;
+use serde_json::json;
+
+
 
 
 #[derive(PartialEq, Debug)]
@@ -38,7 +42,6 @@ enum AppEnv {
     Dev,
     Prod,
 }
-
 
 impl fmt::Display for AppEnv {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -51,16 +54,11 @@ impl fmt::Display for AppEnv {
 }
 
 
-type Pool = bb8::Pool<AsyncDieselConnectionManager<AsyncPgConnection>>;
-
-
-
 async fn main_response_mapper(res: Response) -> Response{
     println!("->> {:<12} - main_response_mapper", "HANDLER");
     println!();
     res
 }
-
 
 async fn start_main_server() -> Result<()>{
     let app_env = match env::var("APP_ENV") {
@@ -85,21 +83,27 @@ async fn start_main_server() -> Result<()>{
         .build(config).await.unwrap();
 
 
-    if let Err(_err) = pool.get().await { panic!("Cannot connect to database - {err}") }
+    if let Err(err) = pool.get().await { panic!("Cannot connect to database - {err}") }
 
+    let state = AppState::new(pool);
 
     let mc = ModelController::new().await?;
+
+
+    let routes_apis = web::routes_tickets::routes(mc.clone()).route_layer(middleware::from_fn(mw_require_auth));
+
+
 
 
     let app = Router::new()
         .route("/", get(handler))
         .merge(web::auth::routes())
-        .nest("/api", web::routes_tickets::routes(mc.clone()))
+        .nest("/api", routes_apis)
         .layer(middleware::map_response(main_response_mapper))
         .layer(CookieManagerLayer::new())
         .fallback(handler_404)
-        .route_layer(middleware::from_fn(metrics_server::track_metrics));
-        // .with_state(pool);
+        .route_layer(middleware::from_fn(metrics_server::track_metrics))
+        .with_state(state);
 
 
 
@@ -137,4 +141,12 @@ async fn handler_404() -> impl IntoResponse {
 async fn handler() -> Html<&'static str> {
     println!("->> {:<12} - root handler", "HANDLER");
     Html("<h1>Hello, World!</h1>")
+}
+
+
+fn internal_error<E>(err: E) -> (StatusCode, String)
+    where
+        E: std::error::Error,
+{
+    (StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
 }

@@ -9,7 +9,7 @@ async fn quick_dev()-> Result<()> {
     let hc = httpc_test::new_client("http://localhost:8080")?;
 
     hc.do_get("/").await?.print().await?;
-    let req_login = hc.do_post("/auth/login", json!({"username": "tracker", "password": "tracker"}));
+    let req_login = hc.do_post("/auth/authorize", json!({"username": "tracker", "password": "tracker"}));
 
 
     req_login.await?.print().await?;
@@ -21,6 +21,8 @@ async fn quick_dev()-> Result<()> {
 
     Ok(())
 }
+
+
 
 
 
