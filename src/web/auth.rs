@@ -1,22 +1,58 @@
 use std::fmt::Display;
-use axum::{async_trait, Json, RequestPartsExt, Router, TypedHeader};
-use axum::extract::FromRequestParts;
+use axum::{async_trait, Form, Json, RequestPartsExt, Router, TypedHeader};
+use axum::extract::{FromRequestParts, State};
 use axum::http::Request;
 use axum::middleware::Next;
-use axum::response::{Response};
-use axum::routing::post;
+use axum::response::{Html, IntoResponse, Response};
+use axum::routing::{get,post};
+use axum_csrf::CsrfToken;
 use headers::{Authorization, HeaderMapExt};
 use headers::authorization::Bearer;
 use http::request::Parts;
 use jsonwebtoken::{decode, DecodingKey, encode, EncodingKey, Header, Validation};
 use once_cell::sync::Lazy;
 use serde::{Serialize, Deserialize};
+use tower_cookies::Cookies;
 use crate::{AppState, Error, Result};
 
 
 pub fn routes() -> Router<AppState> {
-    Router::new().route("/auth/authorize", post(authorize))
+
+    Router::new()
+        .route("/auth/authorize", post(authorize))
+        .route("/auth/login", get(login_page).post(login))
 }
+
+async fn login_page(token: CsrfToken, State(state): State<AppState>) -> impl IntoResponse {
+
+    let mut ctx = tera::Context::new();
+    ctx.insert("csrf_token", &token.authenticity_token());
+
+    let body = state
+        .templates
+        .render("auth/login.html.tera", &ctx)
+        .map_err(|_| Error::TemplateError).expect("Template Render Error");
+
+    (token, Html(body)).into_response()
+}
+
+#[derive(Clone,Deserialize)]
+struct LoginPayload{
+    csrf_token: String,
+    username: String,
+    password: String,
+}
+
+async fn login(token: CsrfToken, form_data: Form<LoginPayload>) -> Result<Html<String>>{
+    if token.verify(&form_data.clone().csrf_token).is_err() {
+        Ok(Html("Token is invalid".to_string()))
+    } else {
+        Ok(Html("Ok".to_string()))
+    }
+}
+
+
+
 
 static KEYS: Lazy<Keys> = Lazy::new(|| {
     let secret = std::env::var("JWT_SECRET").expect("JWT_SECRET must be set");

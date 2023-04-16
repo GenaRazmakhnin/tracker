@@ -1,0 +1,34 @@
+{% extends "layout.html.tera" %} {% block content %}
+<div class="container">
+    <form action="/auth/login" method="post">
+        <div class="twelve columns">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}"/>
+            <input
+                    type="text"
+                    placeholder="enter title"
+                    name="username"
+                    id="title"
+                    value=""
+                    autofocus
+                    class="u-full-width"
+            />
+            <input
+                    type="text"
+                    placeholder="enter content"
+                    name="password"
+                    id="text"
+                    value=""
+                    autofocus
+                    class="u-full-width"
+            />
+        </div>
+        <div class="twelve columns">
+
+            <div class="two columns">
+                <input type="submit" value="save post" />
+            </div>
+        </div>
+    </form>
+
+</div>
+{% endblock content %}

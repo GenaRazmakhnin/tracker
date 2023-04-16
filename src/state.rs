@@ -1,19 +1,17 @@
+use axum_csrf::CsrfConfig;
+use sea_orm::DatabaseConnection;
+use tera::Tera;
 use axum_macros::FromRef;
-use diesel_async::AsyncPgConnection;
-use diesel_async::pooled_connection::AsyncDieselConnectionManager;
-
-pub type Pool = bb8::Pool<AsyncDieselConnectionManager<AsyncPgConnection>>;
 
 #[derive(Clone,FromRef)]
-pub struct AppState{
-    pool: Pool
+pub struct AppState {
+    pub(crate) templates: Tera,
+    conn: DatabaseConnection,
+    csrf: CsrfConfig
 }
 
-
-impl AppState{
-    pub(crate) fn new(pool: Pool) -> Self{
-        Self{
-            pool
-        }
+impl  AppState {
+    pub fn new(templates: Tera, conn: DatabaseConnection, csrf: CsrfConfig) -> Self{
+        Self{ templates, conn,csrf }
     }
 }

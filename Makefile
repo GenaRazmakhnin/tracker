@@ -10,6 +10,6 @@ watch:
 watch-tests:
 	cargo watch -q -c -w tests/ -x "test -q quick_dev -- --nocapture"
 
-.PHONY: diesel-cli
-diesel-cli:
-	brew install diesel
+.PHONY: db-cli
+db-cli:
+	cargo install sea-orm-cli

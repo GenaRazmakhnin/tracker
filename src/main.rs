@@ -1,15 +1,15 @@
 mod metrics_server;
-mod posts;
-mod schema;
 mod shutdown;
 mod auth;
 mod error;
 mod web;
 mod model;
 mod state;
+mod models;
+mod entity;
 
 
-pub use self::state::{AppState, Pool};
+pub use self::state::{AppState};
 pub use self::error::{Error,Result};
 use crate::shutdown::shutdown_signal;
 use crate::model::ModelController;
@@ -19,8 +19,6 @@ use axum::{response::Html, routing::get, Router, middleware};
 use std::net::SocketAddr;
 use axum::http::{StatusCode};
 use axum::response::{IntoResponse, Response};
-use diesel_async::AsyncPgConnection;
-use diesel_async::pooled_connection::{AsyncDieselConnectionManager, PoolableConnection};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 use self::metrics_server::start_metrics_server;
 use std::{
@@ -28,11 +26,13 @@ use std::{
     fmt::{self},
 };
 use std::time::Duration;
+use axum::routing::get_service;
+use axum_csrf::{CsrfConfig, Key};
 use tower_cookies::CookieManagerLayer;
 use crate::web::auth::mw_require_auth;
-use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
-use once_cell::sync::Lazy;
-use serde_json::json;
+use tera::Tera;
+use migration::{Migrator, MigratorTrait};
+use tower_http::services::ServeDir;
 
 
 
@@ -76,16 +76,21 @@ async fn start_main_server() -> Result<()>{
 
     let port = env::var("PORT").unwrap_or("8080".to_string()).parse::<u16>().unwrap();
 
-    let db_url = env::var("DATABASE_URL").unwrap();
-    let config = AsyncDieselConnectionManager::<AsyncPgConnection>::new(db_url.clone());
-    let pool = Pool::builder()
-        .connection_timeout(Duration::from_secs(10))
-        .build(config).await.unwrap();
+    let database_url = env::var("DATABASE_URL").unwrap();
 
 
-    if let Err(err) = pool.get().await { panic!("Cannot connect to database - {err}") }
+    let connection = sea_orm::Database::connect(&database_url.clone()).await.expect("Cannot connect to database");
 
-    let state = AppState::new(pool);
+    if let Err(err) = Migrator::up(&connection, None).await { panic!("Error with database migration - {}",err) };
+
+    let templates = Tera::new(concat!(env!("CARGO_MANIFEST_DIR"), "/templates/**/*"))
+        .expect("Tera initialization failed");
+
+    let cookie_key = Key::generate();
+    let config = CsrfConfig::default().with_key(Some(cookie_key));
+
+    let state = AppState::new(templates, connection ,config);
+
 
     let mc = ModelController::new().await?;
 
@@ -93,12 +98,23 @@ async fn start_main_server() -> Result<()>{
     let routes_apis = web::routes_tickets::routes(mc.clone()).route_layer(middleware::from_fn(mw_require_auth));
 
 
-
-
     let app = Router::new()
         .route("/", get(handler))
         .merge(web::auth::routes())
         .nest("/api", routes_apis)
+        .nest_service(
+            "/static",
+            get_service(ServeDir::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/static"
+            )))
+                //.handle_error(|error: std::io::Error| async move {
+                  //  (
+                    //    StatusCode::INTERNAL_SERVER_ERROR,
+                      //  format!("Unhandled internal error: {error}"),
+                   // )
+               // }),
+        )
         .layer(middleware::map_response(main_response_mapper))
         .layer(CookieManagerLayer::new())
         .fallback(handler_404)

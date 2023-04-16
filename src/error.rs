@@ -16,6 +16,8 @@ pub enum Error{
     TokenCreation,
     InvalidToken,
 
+    TemplateError,
+
 
     TicketDeleteFailIdNotFound {id: String}
 }
